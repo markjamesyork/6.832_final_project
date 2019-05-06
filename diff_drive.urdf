@@ -1,4 +1,4 @@
-<robot name="test_robot">
+<robot name="diff_drive">
    <link name="base_link">
      <visual>
        <geometry>
@@ -9,9 +9,33 @@
          <color rgba="1 1 1 1"/>
        </material>
      </visual>
+     <collision>
+       <geometry>
+         <box size="0.16 0.16 0.12"/>
+       </geometry>
+     </collision>
+     <inertial>
+       <mass value="10"/>
+       <inertia ixx="0.4" ixy="0.0" ixz="0.0" iyy="0.4" iyz="0.0" izz="0.2"/>
+     </inertial>
    </link>
 
+
    <link name="lwheel">
+    <inertial>
+       <origin
+         xyz=".0 .0 .0"
+         rpy="0 0 0" />
+       <mass value="1.0" />
+       <inertia
+         ixx=".00053433"
+         ixy=".0"
+         ixz=".0"
+         iyy=".00053433"
+         iyz=".0"
+         izz=".001058" />
+     </inertial>
+
      <visual>
        <geometry>
          <cylinder length="0.008" radius="0.046"/>
@@ -21,15 +45,37 @@
          <color rgba="0 0 0 1"/>
        </material>
      </visual>
+
+     <collision>
+       <geometry>
+         <cylinder length="0.008" radius="0.046"/>
+       </geometry>
+     </collision>
    </link>
 
-   <joint name="base_to_lwheel" type="fixed">
+
+   <joint name="base_to_lwheel" type="revolute">
      <parent link="base_link"/>
      <child link="lwheel"/>
      <origin xyz="0 0.115 0.046" rpy="1.5708 0 0"/>
+     <axis xyz = "0 0 1"/>
    </joint>
 
    <link name="rwheel">
+     <inertial>
+        <origin
+          xyz=".0 .0 .0"
+          rpy="0 0 0" />
+        <mass value="1.0" />
+        <inertia
+          ixx=".00053433"
+          ixy=".0"
+          ixz=".0"
+          iyy=".00053433"
+          iyz=".0"
+          izz=".001058" />
+      </inertial>
+
      <visual>
        <geometry>
          <cylinder length="0.008" radius="0.046"/>
@@ -39,50 +85,26 @@
          <color rgba="0 0 0 1"/>
        </material>
      </visual>
+
+     <collision>
+       <geometry>
+         <cylinder length="0.008" radius="0.046"/>
+       </geometry>
+     </collision>
+
    </link>
 
-   <joint name="base_to_rwheel" type="fixed">
+   <joint name="base_to_rwheel" type="revolute">
      <parent link="base_link"/>
      <child link="rwheel"/>
      <origin xyz="0 -0.115 0.046" rpy="-1.5708 0 0"/>
+     <axis xyz = "0 0 1"/>
    </joint>
 
-   <link name="fwheel_attach">
-     <visual>
-       <geometry>
-         <cylinder length="0.060" radius="0.023"/>
-       </geometry>
-       <origin rpy="0 0 0" xyz="0.13 0 0.08"/>
-       <material name="white">
-         <color rgba="1 1 1 1"/>
-       </material>
-     </visual>
-   </link>
+   <!--
+   Physical Parameters Link: http://wiki.ros.org/urdf/Tutorials/Adding%20Physical%20and%20Collision%20Properties%20to%20a%20URDF%20Model
 
-   <joint name="base_to_fattach" type="fixed">
-     <parent link="base_link"/>
-     <child link="fwheel_attach"/>
-     <origin xyz="0 0 0" rpy="0 0 0"/>
-   </joint>
-
-   <link name="fwheel">
-     <visual>
-       <geometry>
-         <cylinder length="0.005" radius="0.020"/>
-       </geometry>
-       <origin rpy="1.578 0 0" xyz="0 0 0"/>
-       <material name="black">
-         <color rgba="0 0 0 1"/>
-       </material>
-     </visual>
-   </link>
-
-   <joint name="base_to_fwheel" type="fixed">
-     <parent link="base_link"/>
-     <child link="fwheel"/>
-     <origin xyz="0.13 0 0.02" rpy="0 0 0"/>
-   </joint>
-
+   #Scanner link
    <link name="scanner">
      <visual>
        <geometry>
@@ -99,5 +121,5 @@
      <parent link="base_link"/>
      <child link="scanner"/>
      <origin xyz="0.105 0 0.22" rpy="0 0 0"/>
-
+  -->
   </robot>
