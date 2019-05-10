@@ -37,7 +37,6 @@ class Diff_Drive_Controller(VectorSystem):
         self.print_period = print_period
         self.last_print_time = -print_period
         print('init')
-        self._DoCalcVectorOutput()
 
     def _DoCalcVectorOutput(self, context, plant_state_vec, controller_state_vec, output_vec):
         print('_DoCalcVectorOutput')
