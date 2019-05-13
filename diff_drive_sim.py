@@ -19,9 +19,10 @@ from pydrake.all import (DiagramBuilder, FloatingBaseType, RigidBodyPlant,
                          CompliantContactModelParameters, DrakeVisualizer,
                          AddFlatTerrainToWorld, LogOutput, MultibodyPlant,
                          Parser, UniformGravityFieldElement)
-
+'''
 from pydrake.multibody.rigid_body_tree import (FloatingBaseType,
                                                RigidBodyFrame, RigidBodyTree)
+'''
 from underactuated import (FindResource)
 #Visualtion imports
 from pydrake.systems.meshcat_visualizer import MeshcatVisualizer
@@ -39,8 +40,6 @@ class Diff_Drive_Controller(VectorSystem):
         self.print_period = print_period
         self.last_print_time = -print_period
         u0 = [0.]
-        print('init')
-        print('VectorSystem',VectorSystem)
 
     def _DoCalcVectorOutput(self, context, plant_state_vec, controller_state_vec, output_vec):
         print('_DoCalcVectorOutput')
@@ -52,7 +51,7 @@ class Diff_Drive_Controller(VectorSystem):
         q = plant_state_vec[:] # subtract of fixed values
         v = plant_state_vec[:]
 
-        output_vec[:] = np.zeros(self.plant.get_input_size())
+        output_vec[:] = np.zeros(self.plant.num_actuators())
         output_vec[0] = [1.] # add constant torque of 1
         u0 = [0.]
 #This is running in RigidBodyTree; we need to run in MultibodyPlant
@@ -152,14 +151,14 @@ def diff_drive_pd(x, target_state):
     return u
 
 def lqr_controller(x):
-    actuator_limit: 100. #must determine limits
+    actuator_limit = 100. #must determine limits
     A = np.zeros((2,2))
     B = np.zeros((1,1))
     Q = np.asarray([[10.,0.],[0.,1.]])
     R = np.asarray([0.]) #0 => costless control
     K, S = LinearQuadraticRegulator(A,B,Q,R)
     u = np.matmul(-K,x)
-    if u[0] = np.clip(u[0], -actuator_limit, actuator_limit)
+    u[0] = np.clip(u[0], -actuator_limit, actuator_limit)
     return u
 
 '''
