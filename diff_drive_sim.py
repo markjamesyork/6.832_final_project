@@ -31,12 +31,16 @@ from underactuated.planar_multibody_visualizer import PlanarMultibodyVisualizer
 class Diff_Drive_Controller(VectorSystem):
     def __init__(self, plant, print_period = 0.0):
         VectorSystem.__init__(self, plant.num_positions() + plant.num_velocities(), plant.num_actuators())
+        print("n_inputs", plant.num_positions() + plant.num_velocities())
+        print('n_actuators',plant.num_actuators())
         # 6 inputs (from the 6 outputs of the plant)
         # 3 outputs (for the three actuators on the plant)
         self.plant = plant
         self.print_period = print_period
         self.last_print_time = -print_period
+        u0 = [0.]
         print('init')
+        print('VectorSystem',VectorSystem)
 
     def _DoCalcVectorOutput(self, context, plant_state_vec, controller_state_vec, output_vec):
         print('_DoCalcVectorOutput')
@@ -49,8 +53,8 @@ class Diff_Drive_Controller(VectorSystem):
         v = plant_state_vec[:]
 
         output_vec[:] = np.zeros(self.plant.get_input_size())
-        output_vec[0] = 1 # add constant torque of 1
-
+        output_vec[0] = [1.] # add constant torque of 1
+        u0 = [0.]
 #This is running in RigidBodyTree; we need to run in MultibodyPlant
 #Use 2d planar hopper 20Model, lines 188-204
 
@@ -92,8 +96,8 @@ builder.Connect(scene_graph.get_pose_bundle_output_port(),
                 meshcat.get_input_port(0))
 '''
 visualizer = builder.AddSystem(PlanarMultibodyVisualizer(scene_graph,
-                                                      xlim=[-2.8, 2.8],
-                                                      ylim=[-2.8, 2.8]))
+                                                      xlim=[-1., 1.],
+                                                      ylim=[-1., 1.]))
 builder.Connect(scene_graph.get_pose_bundle_output_port(), visualizer.get_input_port(0))
 
 
@@ -108,12 +112,13 @@ print('n_states',plant.num_positions())
 
 #null_controller = builder.AddSystem(u0)
 #builder.Connect(null_controller.get_output_port(0), plant.get_input_port(0))
+#Controller as in lqr.py for 3d quadrotor
 controller = builder.AddSystem(Diff_Drive_Controller(plant))
 builder.Connect(plant.get_continuous_state_output_port(), controller.get_input_port(0))
 builder.Connect(controller.get_output_port(0), plant.get_actuation_input_port())
 
 #Data Logger
-logger = LogOutput(plant.get_output_port(0), builder)
+logger = LogOutput(plant.get_continuous_state_output_port(), builder)
 
 #Run Simulation
 diagram = builder.Build()
@@ -139,33 +144,31 @@ def diff_drive_pd(x, target_state):
     #Create control Inputs
     kp = 1.0
     kd = kp / 10.
-    theta = 0
-    theta_dot = 0
+    theta = x[3] #Must be verified
+    theta_dot = x[12] #Must be verified
     upright_state = [0., 0.] #[theta, theta_dot]
     u = kp * (upright_state[0] - theta + kd * (upright_state[1] - theta_dot))
 
     return u
 
 def lqr_controller(x):
-
+    actuator_limit: 100. #must determine limits
+    A = np.zeros((2,2))
+    B = np.zeros((1,1))
+    Q = np.asarray([[10.,0.],[0.,1.]])
+    R = np.asarray([0.]) #0 => costless control
+    K, S = LinearQuadraticRegulator(A,B,Q,R)
+    u = np.matmul(-K,x)
+    if u[0] = np.clip(u[0], -actuator_limit, actuator_limit)
     return u
 
 '''
-To dos: 5/8/19
-X Figure out how to set initial state
-X Read documentation / see all class examples for visualizer
-X Make attempt(s) at visualizer
-X Set flat ground
-- Figure out how to implement more creative controller
-X Test different initial states and figure out what each state variable is doing
-NEXT STEPS
-- Implement PD controller
-- Implement LQR controller
-- Examine ROA for PD and LQR controllers
-- Test various swing-up controllers
-- Implement trajectory tracking (e.g. to do the limbo)
-- Test controller on varying slopes
-- Test controller on rough terrain
+To dos: 5/13/19
+- Write LQR controller
+X Edit PD controller
+- Edit urdf
+- Make list of other behaviors and improvements to make
+- Get controller to work (waiting for Piazza / OH)
 
 
 Define upright state
