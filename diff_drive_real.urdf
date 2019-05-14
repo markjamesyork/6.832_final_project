@@ -1,0 +1,185 @@
+<robot name="diff_drive">
+  <link name="ground">
+    <inertial>
+      <mass value="10000"/>
+      <inertia ixx="10000" ixy="0.0" ixz="0.0" iyy="10000" iyz="0.0" izz="10000"/>
+    </inertial>
+    <collision>
+      <geometry>
+        <box size="100.0 100.0 0.02"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <box size="100.0 100.0 0.02"/>
+      </geometry>
+      <material>
+        <diffuse>0.54 0.54 0.54 0.9</diffuse>
+      </material>
+    </visual>
+  </link>
+
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.025 0.03 0.04"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <material name="Yellow2">
+      <color rgba="0.8 0.8 0 1.0"/>
+    </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.025 0.03 0.04"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.042"/>
+      <inertia ixx="0.00000875" ixy="0.0" ixz="0.0" iyy="0.0000077875" iyz="0.0" izz="0.0000053375"/>
+    </inertial>
+  </link>
+
+  <link name="extension">
+    <visual>
+      <geometry>
+        <box size="0.025 0.03 0.085"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <material name="red">
+        <color rgba="1 0 0 0.1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.025 0.03 0.085"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.002"/>
+      <inertia ixx="0.00000135417" ixy="0.0" ixz="0.0" iyy="0.00000130833" iyz="0.0" izz="0.000000254167"/>
+    </inertial>
+  </link>
+
+  <joint name="base_to_extension" type="fixed">
+    <parent link="base_link"/>
+    <child link="extension"/>
+    <origin xyz="0 0 0.0625" rpy="0 0 0"/>
+  </joint>
+
+<!--
+  <link name="head">
+    <visual>
+      <geometry>
+        <box size="0.08255 0.1016 0.01"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.08255 0.1016 0.01"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value=".156"/>
+      <inertia ixx="0.000135493" ixy="0.0" ixz="0.0" iyy="0.0000898885" iyz="0.0" izz="0.000222782"/>
+    </inertial>
+  </link>
+
+  <joint name="extension_to_head" type="fixed">
+    <parent link="extension"/>
+    <child link="head"/>
+    <origin xyz="0 0 0.043" rpy="0 0 0"/>
+  </joint>
+-->
+
+  <link name="lwheel">
+   <inertial>
+      <origin
+        xyz=".0 .0 .0"
+        rpy="0 0 0" />
+      <mass value="0.028" />
+      <inertia
+        ixx=".0000092851"
+        ixy=".0"
+        ixz=".0"
+        iyy=".0000092851"
+        iyz=".0"
+        izz=".0000155594" />
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder length="0.0254" radius="0.0333375"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder length="0.0254" radius="0.0333375"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="base_to_lwheel" type="revolute">
+    <parent link="base_link"/>
+    <child link="lwheel"/>
+    <origin xyz="0 0.03 -0.01" rpy="1.5708 0 0"/>
+    <axis xyz = "0 0 1"/>
+  </joint>
+
+  <link name="rwheel">
+    <inertial>
+       <origin
+         xyz=".0 .0 .0"
+         rpy="0 0 0" />
+       <mass value="0.028" />
+       <inertia
+         ixx=".0000092851"
+         ixy=".0"
+         ixz=".0"
+         iyy=".0000092851"
+         iyz=".0"
+         izz=".0000155594" />
+     </inertial>
+    <visual>
+      <geometry>
+        <cylinder length="0.0254" radius="0.0333375"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder length="0.0254" radius="0.0333375"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="base_to_rwheel" type="revolute">
+    <parent link="base_link"/>
+    <child link="rwheel"/>
+    <origin xyz="0 -0.03 -0.01" rpy="-1.5708 0 0"/>
+    <axis xyz = "0 0 1"/>
+  </joint>
+
+   <transmission name="2_wheel_trans" type="transmission_interface/SimpleTransmission">
+      <actuator name="2_wheel_motor"/>
+      <joint name="base_to_rwheel"/>
+      <joint name="base_to_lwheel"/>
+      <mechanicalReduction>1</mechanicalReduction>
+   </transmission>
+
+   <!--
+   urdf viewer website: https://mymodelrobot.appspot.com/5629499534213120
+   Physical Parameters Link: http://wiki.ros.org/urdf/Tutorials/Adding%20Physical%20and%20Collision%20Properties%20to%20a%20URDF%20Model
+  -->
+  </robot>

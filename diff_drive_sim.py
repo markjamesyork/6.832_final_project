@@ -41,8 +41,8 @@ class Diff_Drive_Controller(VectorSystem):
         self.last_print_time = -print_period
         u0 = [0.]
 
-    def _DoCalcVectorOutput(self, context, plant_state_vec, controller_state_vec, output_vec):
-        print('_DoCalcVectorOutput')
+    def DoCalcVectorOutput(self, context, plant_state_vec, controller_state_vec, output_vec):
+        #print('_DoCalcVectorOutput')
         if (self.print_period and
             context.get_time() - self.last_print_time >= self.print_period):
             print "t: ", context.get_time()
@@ -52,13 +52,10 @@ class Diff_Drive_Controller(VectorSystem):
         v = plant_state_vec[:]
 
         output_vec[:] = np.zeros(self.plant.num_actuators())
-        output_vec[0] = [1.] # add constant torque of 1
-        u0 = [0.]
-#This is running in RigidBodyTree; we need to run in MultibodyPlant
-#Use 2d planar hopper 20Model, lines 188-204
+        output_vec[0] = 0. # add constant torque of 0
 
 #Settings
-duration = 1.0
+duration = 1.5
 
 #Setup simulator elements
 builder = DiagramBuilder()
@@ -73,7 +70,7 @@ builder.Connect(scene_graph.get_query_output_port(),
 
 #Setup plant
 parser = Parser(plant)
-parser.AddModelFromFile("diff_drive.urdf")
+parser.AddModelFromFile("diff_drive_real.urdf")
 plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("ground"))
 plant.AddForceElement(UniformGravityFieldElement())
 plant.Finalize()
@@ -94,18 +91,29 @@ meshcat = builder.AddSystem(MeshcatVisualizer(
 builder.Connect(scene_graph.get_pose_bundle_output_port(),
                 meshcat.get_input_port(0))
 '''
+
 visualizer = builder.AddSystem(PlanarMultibodyVisualizer(scene_graph,
                                                       xlim=[-1., 1.],
-                                                      ylim=[-1., 1.]))
+                                                      ylim=[-1., 1.],
+                                                      facecolor='blue',
+                                                      Tview=np.array([[0., 1., 0., 0.],
+                                                                      [0., 0., 1., 0.],
+                                                                      [0., 0., 0., 1.]])))
 builder.Connect(scene_graph.get_pose_bundle_output_port(), visualizer.get_input_port(0))
 
 
 # Zero inputs -- passive forward simulation
 #print('inspect.getmembers(plant)',inspect.getmembers(plant))
 #u0 = ConstantVectorSource(np.zeros(plant.num_actuators()))
-x0 = np.asarray([0.0]*plant.num_positions()*2) #np.zeros(tree.get_num_positions()*2) #initializes zeros for all states and velocities
-x0[2] = 0.5 #set z above 0
-x0[3] = 0.1
+x0 = np.asarray([0.0]*(plant.num_positions()*2-1)) #np.zeros(tree.get_num_positions()*2) #initializes zeros for all states and velocities
+x0[0] = 0.3
+x0[1] = 0.3
+x0[2] = 0.3 #set z above 0
+x0[3] = 0.3
+x0[4] = math.pi/2.
+x0[5] = 0.
+x0[6] = 0.
+
 print('n_actuators',plant.num_actuators())
 print('n_states',plant.num_positions())
 
@@ -122,22 +130,24 @@ logger = LogOutput(plant.get_continuous_state_output_port(), builder)
 #Run Simulation
 diagram = builder.Build()
 simulator = Simulator(diagram)
-simulator.set_target_realtime_rate(1.0)
+#simulator.set_target_realtime_rate(1.0)
 simulator.Initialize()
-#diff_drive.set_state_vector(simulator.get_mutable_context(), x0) #Old failed attempt to set initial state
-#print('x0',x0)
-state = simulator.get_mutable_context().\
-    get_mutable_continuous_state_vector()
-state.SetFromVector(x0)
+
+plant_context = diagram.GetMutableSubsystemContext(
+    plant, simulator.get_mutable_context())
+plant_context.get_mutable_discrete_state_vector().SetFromVector(x0)
 
 simulator.StepTo(duration)
 
 print('sample_times',logger.sample_times()) #nx1 array
 print('Final State: ',logger.data()[:,-1]) #nxm array
-print('z evolution: ',logger.data()[2,:]) #nxm array
-print('roll evolution: ',logger.data()[3,:])
-print('pitch evolution: ',logger.data()[4,:])
-print('yaw evolution: ',logger.data()[5,:])
+print('x evolution: ',logger.data()[1,:]) #nxm array
+print('y evolution: ',logger.data()[2,:]) #nxm array
+print('z evolution: ',logger.data()[3,:]) #nxm array
+print('roll evolution: ',logger.data()[4,:])
+print('pitch evolution: ',logger.data()[5,:])
+print('yaw evolution: ',logger.data()[6,:])
+
 
 def diff_drive_pd(x, target_state):
     #Create control Inputs
@@ -151,10 +161,30 @@ def diff_drive_pd(x, target_state):
     return u
 
 def lqr_controller(x):
+    #Robot parameters manually set according to actual measurements on 5/13/19
+    m_s = 0.2 #kg
+    d = 0.085 #m
+    m_c = 0.056
+    I_3 = 0.00014548 #kg*m^2
+    R = 0.0333375
+    g = 9.81 #may need to be set as -9.81; test to see
+
+    x_mod = np.asarray([x[0],x[3],x[9],x[12]]) #[x, theta, x_dot, theta_dot] - need to verify positions of theta and theta_dot
+    #Assumes that all zeros is optimal state; may add optimal_state variable and subtract from current state to change
     actuator_limit = 100. #must determine limits
-    A = np.zeros((2,2))
-    B = np.zeros((1,1))
-    Q = np.asarray([[10.,0.],[0.,1.]])
+    A = np.zeros((4,4))
+    A[0,2] = 1.
+    A[1,3] = 1.
+    A[2,1] = (m_s**2 * d**2 * g) / (3*m_c*I_3 + 3*m_c*m_s*d**2 + m_s*I_3)
+    A[3,1] = (m_s*d*g*(3*m_c + m_s)) / (3*m_c*I_3 + 3*m_c*m_s*d**2 + m_s*I_3)
+    B = np.zeros((4,1))
+    B[2,0] = (-(m_s*d**2 + I_3)/R - m_s*d) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)
+    B[3,0] = (-m_s*d/R -3*m_c*m_s) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)
+    Q = np.zeros((4,4))
+    Q[0,0] = 0.
+    Q[1,1] = 0.
+    Q[2,2] = 2.
+    Q[3,3] = 1.
     R = np.asarray([0.]) #0 => costless control
     K, S = LinearQuadraticRegulator(A,B,Q,R)
     u = np.matmul(-K,x)
@@ -163,7 +193,9 @@ def lqr_controller(x):
 
 '''
 To dos: 5/13/19
-- Write LQR controller
+-
+
+X Write LQR controller
 X Edit PD controller
 - Edit urdf
 - Make list of other behaviors and improvements to make
@@ -177,6 +209,12 @@ def UprightState():
     return state
 '''
 '''
+#Questions 5/13/19
+- How to set I3?
+- How to get derivatives from Drake to build A and B matrices?
+- Where in controller is input set?
+
+
 #Questions 5/6/19
 - How to set initial state?
     - Look at Cassie python example
