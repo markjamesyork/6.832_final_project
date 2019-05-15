@@ -45,8 +45,8 @@ class Diff_Drive_Controller(VectorSystem):
 
     def diff_drive_pd(self, x, target_state): # target_state = [theta, theta_dot]
         #Create control Inputs
-        kp = -0.1
-        kd = kp / 20.
+        kp = 0.06
+        kd = kp / 12.
         '''
         quat = x[:4]
         quat_dot = x[9:13]
@@ -55,9 +55,15 @@ class Diff_Drive_Controller(VectorSystem):
         rpy_dot = np.matmul(R_rpy, quat_dot)
         theta_dot = R_rpy[1] #Must be verified
         '''
+        #print('x',x)
+        u = np.zeros((self.plant.num_actuators()))
         theta = math.asin(2*(x[0]*x[2] - x[1]*x[3]))
         theta_dot = x[10] #Shown to be ~1.5% below true theta_dot on average in experiments
-        u = kp * (target_state[0] - theta + kd * (target_state[1] - theta_dot))
+        #print('theta',theta)
+        #print('theta_dot',theta_dot)
+        u[0] = kp * (target_state[0] - theta + kd * (target_state[1] - theta_dot))
+        #print('ans',kp * (target_state[0] - theta + kd * (target_state[1] - theta_dot)))
+        u[1] = -u[0]
         print('u',u)
         return u
 
@@ -71,7 +77,9 @@ class Diff_Drive_Controller(VectorSystem):
         x = plant_state_vec[:] # subtract of fixed values
 
         output_vec[:] = np.zeros(self.plant.num_actuators())
-        output_vec[0] = self.diff_drive_pd(x, np.zeros((2)))#.00005 # add constant torque in newton meters
+        control = self.diff_drive_pd(x, np.zeros((2)))
+        output_vec[0] = control[0] #.00005 # add constant torque in newton meters
+        output_vec[1] = control[1]
 
 #Settings
 duration = 3.0
@@ -123,7 +131,7 @@ builder.Connect(scene_graph.get_pose_bundle_output_port(), visualizer.get_input_
 # Zero inputs -- passive forward simulation
 #print('inspect.getmembers(plant)',inspect.getmembers(plant))
 #u0 = ConstantVectorSource(np.zeros(plant.num_actuators()))
-theta0 = math.pi/30.
+theta0 = math.pi/12.
 x0 = np.zeros((plant.num_positions()*2-1)) #np.zeros(tree.get_num_positions()*2) #initializes zeros for all states and velocities
 x0[0] = math.cos(theta0/2) # q0 or qw
 x0[1] = 0 # q1 or qx
@@ -152,7 +160,7 @@ logger = LogOutput(plant.get_continuous_state_output_port(), builder)
 #Run Simulation
 diagram = builder.Build()
 simulator = Simulator(diagram)
-simulator.set_target_realtime_rate(0.25)
+simulator.set_target_realtime_rate(0.5)
 
 plant_context = diagram.GetMutableSubsystemContext(
     plant, simulator.get_mutable_context())
