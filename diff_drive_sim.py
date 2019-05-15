@@ -21,7 +21,7 @@ from pydrake.all import (DiagramBuilder, FloatingBaseType, RigidBodyPlant,
                          CompliantContactModelParameters, DrakeVisualizer,
                          AddFlatTerrainToWorld, LogOutput, MultibodyPlant,
                          Parser, UniformGravityFieldElement, RollPitchYaw,
-                         Quaternion)
+                         Quaternion, LinearQuadraticRegulator)
 '''
 from pydrake.multibody.rigid_body_tree import (FloatingBaseType,
                                                RigidBodyFrame, RigidBodyTree)
@@ -67,8 +67,47 @@ class Diff_Drive_Controller(VectorSystem):
         print('u',u)
         return u
 
+    def lqr_controller(self, x):
+        #Robot parameters manually set according to actual measurements on 5/13/19
+        m_s = 0.2 #kg
+        d = 0.085 #m
+        m_c = 0.056
+        I_3 = 0.000228373 #.0000989844 #kg*m^2
+        R = 0.0333375
+        g = -9.81 #may need to be set as -9.81; test to see
+
+        u = np.zeros((self.plant.num_actuators()))
+        theta = math.asin(2*(x[0]*x[2] - x[1]*x[3]))
+        theta_dot = x[10] #Shown to be ~1.5% below true theta_dot on average in experiments
+
+        x_mod = np.asarray([x[4],theta,x[12],theta_dot]) #[x, theta, x_dot, theta_dot] - need to verify positions of theta and theta_dot
+        #Assumes that all zeros is optimal state; may add optimal_state variable and subtract from current state to change
+        actuator_limit = .1 #must determine limits
+        A = np.zeros((4,4))
+        A[0,2] = 1.
+        A[1,3] = 1.
+        A[2,1] = (m_s**2 * d**2 * g) / (3*m_c*I_3 + 3*m_c*m_s*d**2 + m_s*I_3) * 180 / math.pi
+        A[3,1] = (m_s*d*g*(3*m_c + m_s)) / (3*m_c*I_3 + 3*m_c*m_s*d**2 + m_s*I_3)
+        B = np.zeros((4,1))
+        B[2,0] = (-(m_s*d**2 + I_3)/R - m_s*d) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)
+        B[3,0] = (-m_s*d/R -3*m_c*m_s) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)*math.pi/180
+        Q = np.zeros((4,4))
+        Q[0,0] = .1
+        Q[1,1] = .2
+        Q[2,2] = .3
+        Q[3,3] = .4
+        R = np.asarray([2.]) #0 => costless control
+        K, S = LinearQuadraticRegulator(A,B,Q,R)
+        #print('A',A)
+        #print('B',B)
+        print('K',K)
+        u[0] = np.matmul(K,x_mod)
+        u[0] = np.clip(u[0], -actuator_limit, actuator_limit)
+        u[1] = -u[0]
+        print('u',u)
+        return u
+
     def DoCalcVectorOutput(self, context, plant_state_vec, controller_state_vec, output_vec):
-        #print('_DoCalcVectorOutput')
         if (self.print_period and
             context.get_time() - self.last_print_time >= self.print_period):
             print "t: ", context.get_time()
@@ -77,12 +116,14 @@ class Diff_Drive_Controller(VectorSystem):
         x = plant_state_vec[:] # subtract of fixed values
 
         output_vec[:] = np.zeros(self.plant.num_actuators())
-        control = self.diff_drive_pd(x, np.zeros((2)))
+        #control = np.zeros((2)) #null controller
+        #control = self.diff_drive_pd(x, np.zeros((2)))
+        control = self.lqr_controller(x)
         output_vec[0] = control[0] #.00005 # add constant torque in newton meters
         output_vec[1] = control[1]
 
 #Settings
-duration = 3.0
+duration = 3.
 
 #Setup simulator elements
 builder = DiagramBuilder()
@@ -144,9 +185,6 @@ x0[7] = 0 # right wheel
 x0[8] = 0 # left wheel
 x0[12] = 0
 
-print('n_actuators',plant.num_actuators())
-print('n_states',plant.num_positions())
-
 #null_controller = builder.AddSystem(u0)
 #builder.Connect(null_controller.get_output_port(0), plant.get_input_port(0))
 #Controller as in lqr.py for 3d quadrotor
@@ -170,7 +208,7 @@ plant_context.get_mutable_discrete_state_vector().SetFromVector(x0)
 simulator.Initialize()
 simulator.StepTo(duration)
 
-print('sample_times',logger.sample_times()) #nx1 array
+#print('sample_times',logger.sample_times()) #nx1 array
 print('Final State: ',logger.data()[:,-1]) #nxm array
 '''
 print('x evolution: ',logger.data()[1,:]) #nxm array
@@ -184,47 +222,6 @@ print('yaw evolution: ',logger.data()[6,:])
 df = pd.DataFrame(logger.data())
 df.to_csv('mbp_logger.csv')
 
-def diff_drive_pd(x, target_state):
-    #Create control Inputs
-    kp = 1.0
-    kd = kp / 10.
-    theta = x[3] #Must be verified
-    theta_dot = x[12] #Must be verified
-    upright_state = [0., 0.] #[theta, theta_dot]
-    u = kp * (upright_state[0] - theta + kd * (upright_state[1] - theta_dot))
-
-    return u
-
-def lqr_controller(x):
-    #Robot parameters manually set according to actual measurements on 5/13/19
-    m_s = 0.2 #kg
-    d = 0.085 #m
-    m_c = 0.056
-    I_3 = 0.00014548 #kg*m^2
-    R = 0.0333375
-    g = 9.81 #may need to be set as -9.81; test to see
-
-    x_mod = np.asarray([x[0],x[3],x[9],x[12]]) #[x, theta, x_dot, theta_dot] - need to verify positions of theta and theta_dot
-    #Assumes that all zeros is optimal state; may add optimal_state variable and subtract from current state to change
-    actuator_limit = 100. #must determine limits
-    A = np.zeros((4,4))
-    A[0,2] = 1.
-    A[1,3] = 1.
-    A[2,1] = (m_s**2 * d**2 * g) / (3*m_c*I_3 + 3*m_c*m_s*d**2 + m_s*I_3)
-    A[3,1] = (m_s*d*g*(3*m_c + m_s)) / (3*m_c*I_3 + 3*m_c*m_s*d**2 + m_s*I_3)
-    B = np.zeros((4,1))
-    B[2,0] = (-(m_s*d**2 + I_3)/R - m_s*d) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)
-    B[3,0] = (-m_s*d/R -3*m_c*m_s) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)
-    Q = np.zeros((4,4))
-    Q[0,0] = 0.
-    Q[1,1] = 0.
-    Q[2,2] = 2.
-    Q[3,3] = 1.
-    R = np.asarray([0.]) #0 => costless control
-    K, S = LinearQuadraticRegulator(A,B,Q,R)
-    u = np.matmul(-K,x)
-    u[0] = np.clip(u[0], -actuator_limit, actuator_limit)
-    return u
 
 '''
 Questions 5/14/19:
