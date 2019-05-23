@@ -21,7 +21,8 @@ from pydrake.all import (DiagramBuilder, FloatingBaseType, RigidBodyPlant,
                          CompliantContactModelParameters, DrakeVisualizer,
                          AddFlatTerrainToWorld, LogOutput, MultibodyPlant,
                          Parser, UniformGravityFieldElement, RollPitchYaw,
-                         Quaternion, LinearQuadraticRegulator)
+                         Quaternion, LinearQuadraticRegulator,
+                         MathematicalProgram, Solve)
 '''
 from pydrake.multibody.rigid_body_tree import (FloatingBaseType,
                                                RigidBodyFrame, RigidBodyTree)
@@ -43,31 +44,72 @@ class Diff_Drive_Controller(VectorSystem):
         self.print_period = print_period
         self.last_print_time = -print_period
 
-    def diff_drive_pd(self, x, target_state): # target_state = [theta, theta_dot]
-        #Create control Inputs
-        kp = 0.06
-        kd = kp / 12.
-        '''
-        quat = x[:4]
-        quat_dot = x[9:13]
-        #rpy = RollPitchYaw(Quaternion(quat/np.linalg.norm(quat)))
-        #R_rpy = rpy.ToRotationMatrix().matrix()
-        rpy_dot = np.matmul(R_rpy, quat_dot)
-        theta_dot = R_rpy[1] #Must be verified
-        '''
-        #print('x',x)
+    def diff_drive_pd(self, x, x_des): # x_des = [x, theta, yaw, x_dot, theta_dot, yaw_dot]
+        kp = 1.
+        kd = kp / 30.
+        ky = .05
+        actuator_limit = .05 #must determine limits
         u = np.zeros((self.plant.num_actuators()))
-        theta = math.asin(2*(x[0]*x[2] - x[1]*x[3]))
+        theta = math.asin(2*(x[0]*x[2] - x[1]*x[3])) #pitch
+        phi = np.arctan2(2*(x[0]*x[1] + x[2]*x[3]), 1-2*(x[1]**2 + x[2]**2))#yaw
         theta_dot = x[10] #Shown to be ~1.5% below true theta_dot on average in experiments
-        #print('theta',theta)
-        #print('theta_dot',theta_dot)
-        u[0] = kp * (target_state[0] - theta + kd * (target_state[1] - theta_dot))
-        #print('ans',kp * (target_state[0] - theta + kd * (target_state[1] - theta_dot)))
+        u[0] = kp * (x_des[1] - theta + kd * (x_des[4] - theta_dot)) + ky * (x_des[2] - phi)
+        u[0] = np.clip(u[0],-actuator_limit,actuator_limit)
         u[1] = -u[0]
-        print('u',u)
+        #print('u',u)
         return u
 
-    def lqr_controller(self, x):
+    def diff_drive_pd_mp(self, x, x_des): # x_des = [x, theta, yaw, x_dot, theta_dot, yaw_dot]
+        m_s = 0.2 #kg
+        d = 0.085 #m
+        m_c = 0.056
+        I_3 = 0.000228373 #.0000989844 #kg*m^2
+        I_2 = .0000989844
+        R = 0.0333375
+        g = -9.81 #may need to be set as -9.81; test to see
+        L = 0.03
+        A_val_theta = (m_s*d*g*(3*m_c + m_s)) / (3*m_c*I_3 + 3*m_c*m_s*d**2 + m_s*I_3)
+        B_val_theta = (-m_s*d/R -3*m_c*m_s) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)*math.pi/180 #multiplicand for u to change in theta_dot
+        B_val_phi = -(2*L/R) / (6*m_c*L**2 + m_c*R**2 + 2*I_2)
+        mp = MathematicalProgram()
+        k = mp.NewContinuousVariables(3, 'k_val') # [kp, kd, ky]
+        u = mp.NewContinuousVariables(2,'u_val')
+        theta_dot_post = mp.NewContinuousVariables(1,'theta_dot_post_val') #estimated value of theta dot after control
+        phi_dot_post = mp.NewContinuousVariables(1,'phi_dot_post_val') #estimated value of theta dot after control
+        '''
+        kp = 1. #regulate theta (pitch) position
+        kd = kp / 20. #regulate theta (pitch) velocity
+        ky = 0.5 #regulate phi (yaw) position
+        '''
+        actuator_limit = .1 #estimate; 0.1 is probably high
+        #mp.AddConstraint(theta[0] == np.arcsin(2*(x[0]*x[2] - x[1]*x[3]))) #pitch
+        theta = np.arcsin(2*(x[0]*x[2] - x[1]*x[3]))
+        phi = np.arctan2(2*(x[0]*x[1] + x[2]*x[3]), 1-2*(x[1]**2 + x[2]**2))#yaw
+        theta_dot = x[10] #Shown to be ~1.5% below true theta_dot on average in experiments
+        mp.AddConstraint(k[0] >= 0.)
+        mp.AddConstraint(k[1] >= 0.)
+        mp.AddConstraint(k[2] >= 0.)
+        mp.AddConstraint(u[0] == k[0] * (x_des[1] - theta + k[1] * (x_des[4] - theta_dot)) + k[2] * (x_des[2] - phi))
+        mp.AddConstraint(u[0] <= -actuator_limit)
+        mp.AddConstraint(u[0] >= -actuator_limit)
+        mp.AddConstraint(u[1] == -u[0])
+        mp.AddConstraint(theta_dot_post[0] == theta_dot + B_val_theta*u[0]*0.0005 + A_val_theta*theta*.0005)
+        mp.AddConstraint(phi_dot_post[0] == x[11] + B_val_phi*u[0]*.0005)
+        theta_dot_des = -(theta - x_des[1])/(2*.0005)
+        mp.AddQuadraticCost((theta_dot_post[0] - theta_dot_des)**2)
+        phi_dot_des = -(phi - x_des[2])/2
+        print('theta_dot_des',theta_dot_des)
+        print('theta',theta)
+        mp.AddQuadraticCost(0.001*(phi_dot_post[0] - phi_dot_des)**2)
+
+        result = Solve(mp)
+        print('Success: ',result.is_success())
+        print('Solver id: ',result.get_solver_id().name())
+        print('k: ',result.GetSolution(k))
+        print('u: ',result.GetSolution(u))
+        return result.GetSolution(u)
+
+    def lqr_controller(self, x, x_des):
         #Robot parameters manually set according to actual measurements on 5/13/19
         m_s = 0.2 #kg
         d = 0.085 #m
@@ -78,11 +120,12 @@ class Diff_Drive_Controller(VectorSystem):
 
         u = np.zeros((self.plant.num_actuators()))
         theta = math.asin(2*(x[0]*x[2] - x[1]*x[3]))
+
         theta_dot = x[10] #Shown to be ~1.5% below true theta_dot on average in experiments
 
-        x_mod = np.asarray([x[4],theta,x[12],theta_dot]) #[x, theta, x_dot, theta_dot] - need to verify positions of theta and theta_dot
+        x_mod = np.asarray([x[4]-x_des[0],theta-x_des[1],x[12]-x_des[2],theta_dot-x_des[3]]) #[x, theta, x_dot, theta_dot] - need to verify positions of theta and theta_dot
         #Assumes that all zeros is optimal state; may add optimal_state variable and subtract from current state to change
-        actuator_limit = .1 #must determine limits
+        actuator_limit = .05 #must determine limits
         A = np.zeros((4,4))
         A[0,2] = 1.
         A[1,3] = 1.
@@ -92,19 +135,19 @@ class Diff_Drive_Controller(VectorSystem):
         B[2,0] = (-(m_s*d**2 + I_3)/R - m_s*d) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)
         B[3,0] = (-m_s*d/R -3*m_c*m_s) / (3*m_c*I_3 + 3*m_c*m_s*d**2 +m_s*I_3)*math.pi/180
         Q = np.zeros((4,4))
-        Q[0,0] = .1
-        Q[1,1] = .2
-        Q[2,2] = .3
-        Q[3,3] = .4
-        R = np.asarray([2.]) #0 => costless control
+        Q[0,0] = 3.
+        Q[1,1] = .1
+        Q[2,2] = .1
+        Q[3,3] = 4.
+        R = np.asarray([1.]) #0 => costless control
         K, S = LinearQuadraticRegulator(A,B,Q,R)
         #print('A',A)
         #print('B',B)
-        print('K',K)
+        #print('K',K)
         u[0] = np.matmul(K,x_mod)
         u[0] = np.clip(u[0], -actuator_limit, actuator_limit)
         u[1] = -u[0]
-        print('u',u)
+        #print('u',u)
         return u
 
     def DoCalcVectorOutput(self, context, plant_state_vec, controller_state_vec, output_vec):
@@ -114,11 +157,13 @@ class Diff_Drive_Controller(VectorSystem):
             self.last_print_time = context.get_time()
 
         x = plant_state_vec[:] # subtract of fixed values
+        x_des = np.zeros((6,)) #[x, theta, yaw, x_dot, theta_dot, yaw_dot]
+        x_des[3] = 0.
 
         output_vec[:] = np.zeros(self.plant.num_actuators())
         #control = np.zeros((2)) #null controller
-        #control = self.diff_drive_pd(x, np.zeros((2)))
-        control = self.lqr_controller(x)
+        #control = self.diff_drive_pd(x, x_des)
+        control = self.lqr_controller(x, x_des)
         output_vec[0] = control[0] #.00005 # add constant torque in newton meters
         output_vec[1] = control[1]
 
@@ -140,6 +185,11 @@ builder.Connect(scene_graph.get_query_output_port(),
 parser = Parser(plant, scene_graph)
 parser.AddModelFromFile("diff_drive_real.urdf")
 plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("ground"))
+'''#Uncomment these three lines if using a urdf with obstacles
+plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("obstacle_1"))
+plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("obstacle_2"))
+plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("obstacle_3"))
+'''
 plant.AddForceElement(UniformGravityFieldElement())
 plant.Finalize()
 
@@ -183,7 +233,7 @@ x0[5] = 0. # y
 x0[6] = .0433371122 # z on ground = .0433371122
 x0[7] = 0 # right wheel
 x0[8] = 0 # left wheel
-x0[12] = 0
+x0[12] = 0. #x_dot
 
 #null_controller = builder.AddSystem(u0)
 #builder.Connect(null_controller.get_output_port(0), plant.get_input_port(0))
@@ -198,7 +248,7 @@ logger = LogOutput(plant.get_continuous_state_output_port(), builder)
 #Run Simulation
 diagram = builder.Build()
 simulator = Simulator(diagram)
-simulator.set_target_realtime_rate(0.5)
+simulator.set_target_realtime_rate(1.)
 
 plant_context = diagram.GetMutableSubsystemContext(
     plant, simulator.get_mutable_context())
@@ -210,18 +260,24 @@ simulator.StepTo(duration)
 
 #print('sample_times',logger.sample_times()) #nx1 array
 print('Final State: ',logger.data()[:,-1]) #nxm array
+x_log = logger.data()[4,:]
+data = logger.data()
+theta_log = np.asarray([math.asin(2*(data[0,i]*data[2,i] - data[1,i]*data[3,i])) for i in range(data.shape[1])])
+#theta = math.asin(2*(x[0]*x[2] - x[1]*x[3]))
+print('Cost: ',np.matmul(theta_log,theta_log.T))
+
 '''
-print('x evolution: ',logger.data()[1,:]) #nxm array
-print('y evolution: ',logger.data()[2,:]) #nxm array
-print('z evolution: ',logger.data()[3,:]) #nxm array
-print('roll evolution: ',logger.data()[4,:])
-print('pitch evolution: ',logger.data()[5,:])
-print('yaw evolution: ',logger.data()[6,:])
+#print('x evolution: ',logger.data()[1,:]) #nxm array
+#print('y evolution: ',logger.data()[2,:]) #nxm array
+#print('z evolution: ',logger.data()[3,:]) #nxm array
+#print('roll evolution: ',logger.data()[4,:])
+#print('pitch evolution: ',logger.data()[5,:])
+#print('yaw evolution: ',logger.data()[6,:])
 '''
+
 #Printing logger data to file
 df = pd.DataFrame(logger.data())
 df.to_csv('mbp_logger.csv')
-
 
 '''
 Questions 5/14/19:
